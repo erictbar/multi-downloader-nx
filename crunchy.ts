@@ -1345,18 +1345,47 @@ export default class Crunchy implements ServiceClass {
       }
       return [];
     }
-    const objectInfoAndroid = await objectReq.res.json() as CrunchyAndroidObject;
-    objectInfo = {
-      total: objectInfoAndroid.total,
-      data: objectInfoAndroid.items,
-      meta: {}
-    };
+    const objectInfoAndroid = await objectReq.res.json() as any;
+    
+    // Debug: Log the response to understand its structure
+    if(this.debug){
+      console.info('API Response:', JSON.stringify(objectInfoAndroid, null, 2));
+    }
+    
+    // Handle different response structures for music videos vs regular content
+    if (objectInfoAndroid.items) {
+      objectInfo = {
+        total: objectInfoAndroid.total,
+        data: objectInfoAndroid.items,
+        meta: {}
+      };
+    } else if (objectInfoAndroid.data) {
+      objectInfo = {
+        total: objectInfoAndroid.total || objectInfoAndroid.data.length,
+        data: objectInfoAndroid.data,
+        meta: {}
+      };
+    } else if (Array.isArray(objectInfoAndroid)) {
+      objectInfo = {
+        total: objectInfoAndroid.length,
+        data: objectInfoAndroid,
+        meta: {}
+      };
+    } else {
+      console.error('Unexpected API response structure:', objectInfoAndroid);
+      return [];
+    }
 
     if(earlyReturn){
       return objectInfo;
     }
 
     const selectedMedia: Partial<CrunchyEpMeta>[] = [];
+
+    if (!objectInfo.data || !Array.isArray(objectInfo.data)) {
+      console.error('No valid data array found in response');
+      return [];
+    }
 
     for(const item of objectInfo.data){
       if(item.type != 'episode' && item.type != 'movie' && item.type != 'musicVideo'){
