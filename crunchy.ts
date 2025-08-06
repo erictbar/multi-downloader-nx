@@ -1323,16 +1323,40 @@ export default class Crunchy implements ServiceClass {
 
     // reqs
     let objectInfo: ObjectInfo = { total: 0, data: [], meta: {} };
+    
+    // Determine if this is a music video (MV prefix) or concert (MC prefix)
+    const isMusicVideo = doEpsFilter.values.some(id => id.startsWith('MV'));
+    const isConcert = doEpsFilter.values.some(id => id.startsWith('MC'));
+    
+    let apiEndpoint;
+    if (isMusicVideo) {
+      apiEndpoint = '/content/v2/music/music_videos/';
+    } else if (isConcert) {
+      apiEndpoint = '/content/v2/music/concerts/';
+    } else {
+      // Fallback to regular objects endpoint
+      apiEndpoint = this.cmsToken.cms_web.bucket + '/objects/';
+    }
+    
     const objectReqOpts = [
-      domain.api_beta,
-      '/content/v2/music/music_videos/',
+      isMusicVideo || isConcert ? domain.api_beta : api.cms_bucket,
+      apiEndpoint,
       doEpsFilter.values.join(','),
       '?',
-      new URLSearchParams({
-        'force_locale': '',
-        'preferred_audio_language': 'ja-JP',
-        'locale': this.locale,
-      }),
+      new URLSearchParams(
+        isMusicVideo || isConcert ? {
+          'force_locale': '',
+          'preferred_audio_language': 'ja-JP',
+          'locale': this.locale,
+        } : {
+          'force_locale': '',
+          'preferred_audio_language': 'ja-JP',
+          'locale': this.locale,
+          'Policy': this.cmsToken.cms_web.policy,
+          'Signature': this.cmsToken.cms_web.signature,
+          'Key-Pair-Id': this.cmsToken.cms_web.key_pair_id,
+        }
+      ),
     ].join('');
     const objectReq = await this.req.getData(objectReqOpts, AuthHeaders);
     if(!objectReq.ok || !objectReq.res){
@@ -1388,7 +1412,7 @@ export default class Crunchy implements ServiceClass {
     }
 
     for(const item of objectInfo.data){
-      if(item.type != 'episode' && item.type != 'movie' && item.type != 'musicVideo'){
+      if(item.type != 'episode' && item.type != 'movie' && item.type != 'musicVideo' && item.type != 'concert' && item.type != 'musicConcert'){
         await this.logObject(item, 2, true, false);
         continue;
       }
@@ -1449,6 +1473,19 @@ export default class Crunchy implements ServiceClass {
         epMeta.seriesTitle = item.title;
         epMeta.seasonTitle = item.title;
         epMeta.episodeNumber = 'Music Video';
+        epMeta.episodeTitle = item.title;
+      } else if (item.type === 'concert' || item.type === 'musicConcert') {
+        epMeta.data = [
+          {
+            mediaId: 'C:' + item.id,
+            isSubbed: false,
+            isDubbed: false
+          }
+        ];
+        epMeta.season = 0;
+        epMeta.seriesTitle = item.title;
+        epMeta.seasonTitle = item.title;
+        epMeta.episodeNumber = 'Concert';
         epMeta.episodeTitle = item.title;
       }
       if (item.streams_link) {
@@ -1689,9 +1726,15 @@ export default class Crunchy implements ServiceClass {
       }
 
       const isMusicVideo = mMeta.mediaId.startsWith('V:');
-      const playbackUrl = isMusicVideo 
-        ? `https://www.crunchyroll.com/playback/v1/music/${currentVersion ? currentVersion.guid : currentMediaId}/${CrunchyPlayStreams[options.vstream]}/play`
-        : `https://www.crunchyroll.com/playback/v3/${currentVersion ? currentVersion.guid : currentMediaId}/${CrunchyPlayStreams[options.vstream]}/play`;
+      const isConcert = mMeta.mediaId.startsWith('C:');
+      
+      let playbackUrl;
+      if (isMusicVideo || isConcert) {
+        // Both music videos and concerts use the same music playback endpoint
+        playbackUrl = `https://www.crunchyroll.com/playback/v1/music/${currentVersion ? currentVersion.guid : currentMediaId}/${CrunchyPlayStreams[options.vstream]}/play`;
+      } else {
+        playbackUrl = `https://www.crunchyroll.com/playback/v3/${currentVersion ? currentVersion.guid : currentMediaId}/${CrunchyPlayStreams[options.vstream]}/play`;
+      }
       
       const videoPlaybackReq = await this.req.getData(playbackUrl, AuthHeaders);
       if (!videoPlaybackReq.ok || !videoPlaybackReq.res) {
@@ -1725,9 +1768,13 @@ export default class Crunchy implements ServiceClass {
       }
 
       if (!options.cstream && (options.vstream !== options.astream)) {
-        const audioPlaybackUrl = isMusicVideo 
-          ? `https://www.crunchyroll.com/playback/v1/music/${currentVersion ? currentVersion.guid : currentMediaId}/${CrunchyPlayStreams[options.astream]}/play`
-          : `https://www.crunchyroll.com/playback/v3/${currentVersion ? currentVersion.guid : currentMediaId}/${CrunchyPlayStreams[options.astream]}/play`;
+        let audioPlaybackUrl;
+        if (isMusicVideo || isConcert) {
+          // Both music videos and concerts use the same music playback endpoint
+          audioPlaybackUrl = `https://www.crunchyroll.com/playback/v1/music/${currentVersion ? currentVersion.guid : currentMediaId}/${CrunchyPlayStreams[options.astream]}/play`;
+        } else {
+          audioPlaybackUrl = `https://www.crunchyroll.com/playback/v3/${currentVersion ? currentVersion.guid : currentMediaId}/${CrunchyPlayStreams[options.astream]}/play`;
+        }
         
         const audioPlaybackReq = await this.req.getData(audioPlaybackUrl, AuthHeaders);
         if (!audioPlaybackReq.ok || !audioPlaybackReq.res) {
