@@ -932,6 +932,25 @@ const args: TAppArg<boolean|number|string|unknown[]>[] = [
     }
   },
   {
+    name: 'defaultVideo',
+    describe: `Set the default video track by language code\nPossible Values: ${languages.map(a => a.code).join(', ')}`,
+    docDescribe: true,
+    group: 'mux',
+    service: ['all'],
+    type: 'string',
+    usage: '${args}',
+    default: {
+      default: 'eng'
+    },
+    transformer: (val) => {
+      const item = languages.find(a => a.code === val);
+      if (!item) {
+        throw new Error(`Unable to find language code ${val}!`);
+      }
+      return item;
+    }
+  },
+  {
     name: 'ccTag',
     describe: 'Used to set the name for subtitles that contain tranlations for none verbal communication (e.g. signs)',
     docDescribe: true,

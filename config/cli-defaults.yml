@@ -22,5 +22,5 @@ dubLang: ["eng","jpn"]
 dlsubs: ["all"]
 # What language Audio to set as default
 defaultAudio: "eng"
-# WWhat language Video to set as default
-default: "eng"
+# What language Video to set as default
+defaultVideo: "eng"

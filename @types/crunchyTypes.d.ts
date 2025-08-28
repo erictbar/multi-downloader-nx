@@ -33,6 +33,7 @@ export type CrunchyDownloadOptions = {
   mkvmergeOptions: string[],
   defaultSub: LanguageItem,
   defaultAudio: LanguageItem,
+  defaultVideo: LanguageItem,
   ccTag: string,
   dlVideoOnce: boolean,
   skipmux?: boolean,
@@ -67,6 +68,7 @@ export type CrunchyMuxOptions = {
   mkvmergeOptions: string[],
   defaultSub: LanguageItem,
   defaultAudio: LanguageItem,
+  defaultVideo: LanguageItem,
   ccTag: string,
   syncTiming: boolean,
 }

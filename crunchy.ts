@@ -14,6 +14,7 @@ import Helper from './modules/module.helper';
 // custom modules
 import * as fontsData from './modules/module.fontsData';
 import * as langsData from './modules/module.langsData';
+import { LanguageItem } from './modules/module.langsData';
 import * as yamlCfg from './modules/module.cfg-loader';
 import * as yargs from './modules/module.app-args';
 import Merger, { Font, MergerInput, SubtitleInput } from './modules/module.merger';
@@ -125,7 +126,7 @@ export default class Crunchy implements ServiceClass {
       const selected = await this.downloadFromSeriesID(argv.series, { ...argv });
       if (selected.isOk) {
         for (const select of selected.value) {
-          if (!(await this.downloadEpisode(select, {...argv, skipsubs: false}, true))) {
+          if (!(await this.downloadEpisode(select, {...argv, skipsubs: false, defaultVideo: argv.defaultVideo as LanguageItem}, true))) {
             console.error(`Unable to download selected episode ${select.episodeNumber}`);
             return false;
           }
@@ -158,7 +159,7 @@ export default class Crunchy implements ServiceClass {
       const selected = await this.getSeasonById(argv.s, argv.numbers, argv.e, argv.but, argv.all);
       if (selected.isOk) {
         for (const select of selected.value) {
-          if (!(await this.downloadEpisode(select, {...argv, skipsubs: false }))) {
+          if (!(await this.downloadEpisode(select, {...argv, skipsubs: false, defaultVideo: argv.defaultVideo as LanguageItem }))) {
             console.error(`Unable to download selected episode ${select.episodeNumber}`);
             return false;
           }
@@ -174,7 +175,7 @@ export default class Crunchy implements ServiceClass {
       argv.dubLang = [argv.dubLang[0]];
       const selected = await this.getObjectById(argv.e, false);
       for (const select of selected as Partial<CrunchyEpMeta>[]) {
-        if (!(await this.downloadEpisode(select as CrunchyEpMeta, {...argv, skipsubs: false}))) {
+        if (!(await this.downloadEpisode(select as CrunchyEpMeta, {...argv, skipsubs: false, defaultVideo: argv.defaultVideo as LanguageItem}))) {
           console.error(`Unable to download selected episode ${select.episodeNumber}`);
           return false;
         }
@@ -188,7 +189,7 @@ export default class Crunchy implements ServiceClass {
       argv.dubLang = [argv.dubLang[0]];
       const selected = await this.getObjectById(argv.extid, false, true);
       for (const select of selected as Partial<CrunchyEpMeta>[]) {
-        if (!(await this.downloadEpisode(select as CrunchyEpMeta, {...argv, skipsubs: false}))) {
+        if (!(await this.downloadEpisode(select as CrunchyEpMeta, {...argv, skipsubs: false, defaultVideo: argv.defaultVideo as LanguageItem}))) {
           console.error(`Unable to download selected episode ${select.episodeNumber}`);
           return false;
         }
@@ -2669,15 +2670,40 @@ export default class Crunchy implements ServiceClass {
     if (data.some(a => a.type === 'Audio')) {
       hasAudioStreams = true;
     }
+
+    // Function to prioritize videos based on defaultVideo setting
+    const prioritizeVideos = (videos: DownloadedMedia[]): DownloadedMedia[] => {
+      return videos.filter(a => a.type === 'Video').sort((a, b) => {
+        // TypeScript guard to ensure we have video streams with lang property
+        if (a.type !== 'Video' || b.type !== 'Video') return 0;
+        
+        // Prioritize defaultVideo language first
+        if (a.lang.code === options.defaultVideo.code && b.lang.code !== options.defaultVideo.code) {
+          return -1;
+        }
+        if (b.lang.code === options.defaultVideo.code && a.lang.code !== options.defaultVideo.code) {
+          return 1;
+        }
+        // Keep original order for same priority
+        return 0;
+      });
+    };
+
+    // Get video streams and prioritize them
+    const videoStreams = data.filter(a => a.type === 'Video');
+    const prioritizedVideoStreams = prioritizeVideos(videoStreams) as Array<DownloadedMedia & { type: 'Video' }>;
+
     const merger = new Merger({
-      onlyVid: hasAudioStreams ? data.filter(a => a.type === 'Video').map((a) : MergerInput => {
+      onlyVid: hasAudioStreams ? prioritizedVideoStreams.map((a, index) : MergerInput => {
         return {
           lang: a.lang,
           path: a.path,
+          isPrimary: a.lang.code === options.defaultVideo.code
         };
       }) : [],
       skipSubMux: options.skipSubMux,
       onlyAudio: hasAudioStreams ? data.filter(a => a.type === 'Audio').map((a) : MergerInput => {
+        if (a.type !== 'Audio') throw new Error('Expected audio stream');
         return {
           lang: a.lang,
           path: a.path,
@@ -2695,13 +2721,15 @@ export default class Crunchy implements ServiceClass {
       simul: false,
       keepAllVideos: options.keepAllVideos,
       fonts: Merger.makeFontsList(this.cfg.dir.fonts, data.filter(a => a.type === 'Subtitle') as sxItem[]),
-      videoAndAudio: hasAudioStreams ? [] : data.filter(a => a.type === 'Video').map((a) : MergerInput => {
+      videoAndAudio: hasAudioStreams ? [] : prioritizedVideoStreams.map((a, index) : MergerInput => {
         return {
           lang: a.lang,
           path: a.path,
+          isPrimary: a.lang.code === options.defaultVideo.code
         };
       }),
       chapters: data.filter(a => a.type === 'Chapters').map((a) : MergerInput => {
+        if (a.type !== 'Chapters') throw new Error('Expected chapters stream');
         return {
           path: a.path,
           lang: a.lang
@@ -2714,7 +2742,8 @@ export default class Crunchy implements ServiceClass {
       },
       defaults: {
         audio: options.defaultAudio,
-        sub: options.defaultSub
+        sub: options.defaultSub,
+        video: options.defaultVideo
       },
       ccTag: options.ccTag
     });

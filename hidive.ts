@@ -1037,13 +1037,35 @@ export default class Hidive implements ServiceClass {
     if (data.some(a => a.type === 'Audio')) {
       hasAudioStreams = true;
     }
+
+    // Function to prioritize videos based on defaultVideo setting
+    const prioritizeVideos = (videos: DownloadedMedia[]): DownloadedMedia[] => {
+      return videos.filter(a => a.type === 'Video').sort((a, b) => {
+        // TypeScript guard to ensure we have video streams with lang property
+        if (a.type !== 'Video' || b.type !== 'Video') return 0;
+        
+        // Prioritize defaultVideo language first
+        if (options.defaultVideo && a.lang.code === options.defaultVideo.code && b.lang.code !== options.defaultVideo.code) {
+          return -1;
+        }
+        if (options.defaultVideo && b.lang.code === options.defaultVideo.code && a.lang.code !== options.defaultVideo.code) {
+          return 1;
+        }
+        // Keep original order for same priority
+        return 0;
+      });
+    };
+
+    // Get video streams and prioritize them
+    const videoStreams = data.filter(a => a.type === 'Video');
+    const prioritizedVideoStreams = prioritizeVideos(videoStreams) as Array<DownloadedMedia & { type: 'Video' }>;
+
     const merger = new Merger({
-      onlyVid: hasAudioStreams ? data.filter(a => a.type === 'Video').map((a) : MergerInput => {
-        if (a.type === 'Subtitle')
-          throw new Error('Never');
+      onlyVid: hasAudioStreams ? prioritizedVideoStreams.map((a) : MergerInput => {
         return {
           lang: a.lang,
           path: a.path,
+          isPrimary: options.defaultVideo && a.lang.code === options.defaultVideo.code
         };
       }) : [],
       skipSubMux: options.skipSubMux,
@@ -1069,18 +1091,15 @@ export default class Hidive implements ServiceClass {
           closedCaption: a.cc
         };
       }),
-      simul: data.filter(a => a.type === 'Video').map((a) : boolean => {
-        if (a.type === 'Subtitle')
-          throw new Error('Never');
+      simul: prioritizedVideoStreams.map((a) : boolean => {
         return !a.uncut as boolean;
       })[0],
       fonts: Merger.makeFontsList(this.cfg.dir.fonts, data.filter(a => a.type === 'Subtitle') as sxItem[]),
-      videoAndAudio: hasAudioStreams ? [] : data.filter(a => a.type === 'Video').map((a) : MergerInput => {
-        if (a.type === 'Subtitle')
-          throw new Error('Never');
+      videoAndAudio: hasAudioStreams ? [] : prioritizedVideoStreams.map((a) : MergerInput => {
         return {
           lang: a.lang,
           path: a.path,
+          isPrimary: options.defaultVideo && a.lang.code === options.defaultVideo.code
         };
       }),
       videoTitle: options.videoTitle,
@@ -1090,7 +1109,8 @@ export default class Hidive implements ServiceClass {
       },
       defaults: {
         audio: options.defaultAudio,
-        sub: options.defaultSub
+        sub: options.defaultSub,
+        video: options.defaultVideo
       },
       ccTag: options.ccTag
     });

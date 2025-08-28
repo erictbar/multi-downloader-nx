@@ -54,7 +54,8 @@ export type MergerOptions = {
   },
   defaults: {
     audio: LanguageItem,
-    sub: LanguageItem
+    sub: LanguageItem,
+    video: LanguageItem
   }
 }
 
@@ -78,23 +79,38 @@ class Merger {
         const videoInfo = streamInfo.streams.filter(stream => stream.codec_type == 'video');
         vnas[vnaIndex].duration = parseInt(videoInfo[0].duration as string);
       }
-      //Sort videoAndAudio streams by duration (shortest first)
-      vnas.sort((a,b) => {
-        if (!a.duration || !b.duration) return -1;
-        return a.duration - b.duration;
-      });
-      //Set Delays
-      const shortestDuration = vnas[0].duration;
+      
+      // Find the default video language as reference instead of shortest
+      let referenceDuration: number | undefined;
+      let referenceVideo = vnas.find(vna => vna.lang.code === this.options.defaults.video.code);
+      
+      if (referenceVideo && referenceVideo.duration) {
+        referenceDuration = referenceVideo.duration;
+        console.info(`Using ${referenceVideo.lang.name} video as timing reference (${referenceDuration}s)`);
+      } else {
+        // Fallback to shortest duration if default video not found
+        vnas.sort((a,b) => {
+          if (!a.duration || !b.duration) return -1;
+          return a.duration - b.duration;
+        });
+        referenceDuration = vnas[0].duration;
+        referenceVideo = vnas[0];
+        console.warn(`Default video language not found, falling back to shortest video (${referenceVideo.lang.name}) as timing reference`);
+      }
+      
+      //Set Delays based on reference video
       for (const [vnaIndex, vna] of vnas.entries()) {
-        //Don't calculate the shortestDuration track
-        if (vnaIndex == 0) {
+        if (vna === referenceVideo) {
+          // Reference video gets no delay
           if (!vna.isPrimary && vna.isPrimary !== undefined) 
-            console.warn('Shortest video isn\'t primary, this might lead to problems with subtitles. Please report on github or discord if you experience issues.');
+            console.warn('Reference video isn\'t marked as primary, this might lead to problems with subtitles. Please report on github or discord if you experience issues.');
           continue;
         }
-        if (vna.duration && shortestDuration) {
-          //Calculate the tracks delay
-          vna.delay = Math.ceil((vna.duration-shortestDuration) * 1000) / 1000;
+        if (vna.duration && referenceDuration) {
+          //Calculate the tracks delay relative to reference video
+          vna.delay = Math.ceil((vna.duration - referenceDuration) * 1000) / 1000;
+          console.info(`Setting ${vna.lang.name} video delay: ${vna.delay}s`);
+          
           //TODO: set primary language for audio so it can be used to determine which track needs the delay
           //The above is a problem in the event that it isn't the dub that needs the delay, but rather the sub.
           //Alternatively: Might not work: it could be checked if there are multiple of the same video language, and if there is
@@ -118,9 +134,12 @@ class Merger {
     let hasVideo = false;
 
     for (const vid of this.options.videoAndAudio) {
-      if (vid.delay && hasVideo) {
+      if (vid.delay) {
+        // Apply offset for both video and audio timing
+        const offsetSign = vid.delay >= 0 ? '-' : '+';
+        const offsetValue = Math.abs(Math.ceil(vid.delay*1000));
         args.push(
-          `-itsoffset -${Math.ceil(vid.delay*1000)}ms`
+          `-itsoffset ${offsetSign}${offsetValue}ms`
         );
       }
       args.push(`-i "${vid.path}"`);
@@ -225,6 +244,12 @@ class Merger {
         const trackName = ((this.options.videoTitle ?? vid.lang.name) + (this.options.simul ? ' [Simulcast]' : ' [Uncut]'));
         args.push('--track-name', `0:"${trackName}"`);
         args.push(`--language 0:${vid.lang.code}`);
+        // Set default video track based on defaultVideo preference
+        if (this.options.defaults.video.code === vid.lang.code) {
+          args.push('--default-track 0');
+        } else {
+          args.push('--default-track 0:0');
+        }
         hasVideo = true;
         args.push(`"${vid.path}"`);
       }
@@ -234,8 +259,10 @@ class Merger {
       const audioTrackNum = this.options.inverseTrackOrder ? '0' : '1';
       const videoTrackNum = this.options.inverseTrackOrder ? '1' : '0';
       if (vid.delay) {
+        // Apply delay to both video and audio tracks to keep them in sync
         args.push(
-          `--sync ${audioTrackNum}:-${Math.ceil(vid.delay*1000)}`
+          `--sync ${audioTrackNum}:${vid.delay >= 0 ? '+' : ''}${Math.ceil(vid.delay*1000)}`,
+          `--sync ${videoTrackNum}:${vid.delay >= 0 ? '+' : ''}${Math.ceil(vid.delay*1000)}`
         );
       }
       if (!hasVideo || this.options.keepAllVideos) {
@@ -247,10 +274,17 @@ class Merger {
         args.push('--track-name', `0:"${trackName}"`);
         //args.push('--track-name', `1:"${trackName}"`);
         args.push(`--language ${audioTrackNum}:${vid.lang.code}`);
+        args.push(`--language ${videoTrackNum}:${vid.lang.code}`);
+        // Set default tracks based on language preferences
         if (this.options.defaults.audio.code === vid.lang.code) {
           args.push(`--default-track ${audioTrackNum}`);
         } else {
           args.push(`--default-track ${audioTrackNum}:0`);
+        }
+        if (this.options.defaults.video.code === vid.lang.code) {
+          args.push(`--default-track ${videoTrackNum}`);
+        } else {
+          args.push(`--default-track ${videoTrackNum}:0`);
         }
         hasVideo = true;
       } else {
