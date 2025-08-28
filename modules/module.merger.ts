@@ -136,7 +136,9 @@ class Merger {
     for (const vid of this.options.videoAndAudio) {
       if (vid.delay) {
         // Apply offset for both video and audio timing
-        const offsetSign = vid.delay >= 0 ? '-' : '+';
+        // If video is longer than reference (positive delay), we need positive offset to start later
+        // If video is shorter than reference (negative delay), we need negative offset to start earlier
+        const offsetSign = vid.delay >= 0 ? '+' : '-';
         const offsetValue = Math.abs(Math.ceil(vid.delay*1000));
         args.push(
           `-itsoffset ${offsetSign}${offsetValue}ms`
@@ -177,8 +179,11 @@ class Merger {
     for (const index in this.options.subtitles) {
       const sub = this.options.subtitles[index];
       if (sub.delay) {
+        // Subtitle delay: if subtitle track is longer than reference, start it later (positive offset)
+        const offsetSign = sub.delay >= 0 ? '+' : '-';
+        const offsetValue = Math.abs(Math.ceil(sub.delay*1000));
         args.push(
-          `-itsoffset -${Math.ceil(sub.delay*1000)}ms`
+          `-itsoffset ${offsetSign}${offsetValue}ms`
         );
       }
       args.push(`-i "${sub.file}"`);

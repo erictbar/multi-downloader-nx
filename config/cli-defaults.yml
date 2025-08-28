@@ -13,7 +13,7 @@ nocleanup: false
 # Whether to only download the relevant video once
 dlVideoOnce: false
 # Whether to keep all downloaded videos or only a single copy
-keepAllVideos: false
+keepAllVideos: true
 # What to use as the file name template
 fileName: "[${service}] ${showTitle} - S${season}E${episode} [${height}p]"
 # What Audio languages to download
